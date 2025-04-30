@@ -30,7 +30,17 @@ class InstanceRecoveryStack(Stack):
             actions=[
                 "ec2:StartInstances",
                 "ec2:DescribeInstances",
-                "ec2:ModifyInstanceAttribute"
+                "ec2:ModifyInstanceAttribute",
+                "ec2:CreateTags",
+                "ec2:DescribeTags",
+                "ec2:DescribeInstanceTypes",
+                "ec2:GetInstanceTypesFromInstanceRequirements"
+            ],
+            resources=["*"]
+        ))
+        handler.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "pricing:GetProducts"
             ],
             resources=["*"]
         ))
@@ -39,12 +49,18 @@ class InstanceRecoveryStack(Stack):
         rule = events.Rule(
             self, "StartInstancesFailureRule",
             event_pattern=events.EventPattern(
-                source=["aws.cloudtrail"],
                 detail_type=["AWS API Call via CloudTrail"],
                 detail={
                     "eventSource": ["ec2.amazonaws.com"],
                     "eventName": ["StartInstances"],
-                    "errorCode": ["Server.InsufficientInstanceCapacity"]
+                    "errorCode": ["Server.InsufficientInstanceCapacity"],
+                    "userIdentity": {
+                        "sessionContext": {
+                        "sessionIssuer": {
+                        "userName": [ { "anything-but": { "prefix": [ self.stack_name] } } ]
+        }
+      }
+    }
                 }
             )
         )
