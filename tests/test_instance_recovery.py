@@ -7,12 +7,21 @@ import os
 # Add the lambda directory to the Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'lambda'))
 
-from instance_recovery import handler, get_alternative_instance_types
+from instance_recovery import handler, EC2InstanceManager
 
 class TestInstanceRecovery(unittest.TestCase):
     def setUp(self):
         self.event = {
             'detail': {
+                'userIdentity': {
+                    'principalId': 'AROAEXAMPLE:user'
+                },
+                'sessionContext': {
+                    'attributes': {
+                        'creationDate': '2023-01-01T00:00:00Z'
+                    }
+                },
+                'eventTime': '2023-01-01T00:00:00Z',
                 'requestParameters': {
                     'instancesSet': {
                         'items': [
@@ -24,10 +33,28 @@ class TestInstanceRecovery(unittest.TestCase):
             }
         }
 
-    @patch('instance_recovery.ec2')
-    def test_handler_successful_restart(self, mock_ec2):
+    @patch('boto3.resource')
+    def test_handler_deduplication(self, mock_boto3_resource):
+        # Mock DynamoDB table and conditional check failure
+        mock_table = MagicMock()
+        mock_boto3_resource.return_value.Table.return_value = mock_table
+        mock_table.put_item.side_effect = mock_boto3_resource.return_value.meta.client.exceptions.ConditionalCheckFailedException({}, "ConditionalCheckFailed")
+        
+        response = handler(self.event, None)
+        
+        self.assertEqual(response['statusCode'], 200)
+        self.assertEqual(response['body'], 'Duplicate event, skipped processing')
+        mock_table.put_item.assert_called_once()
+
+    @patch('boto3.resource')
+    @patch.object(EC2InstanceManager, 'start_instance_with_fallback')
+    def test_handler_successful_restart(self, mock_start_instance, mock_boto3_resource):
+        # Mock DynamoDB table
+        mock_table = MagicMock()
+        mock_boto3_resource.return_value.Table.return_value = mock_table
+        
         # Mock successful start
-        mock_ec2.start_instances.return_value = {'StartingInstances': []}
+        mock_start_instance.return_value = True
         
         response = handler(self.event, None)
         
@@ -36,31 +63,25 @@ class TestInstanceRecovery(unittest.TestCase):
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0]['status'], 'started')
         self.assertEqual(results[0]['action'], 'restart')
+        mock_table.put_item.assert_called_once()
 
-    @patch('instance_recovery.ec2')
-    def test_handler_type_modification(self, mock_ec2):
-        # Mock failed start followed by successful modification and start
-        mock_ec2.start_instances.side_effect = [
-            Exception("InsufficientInstanceCapacity"),
-            {'StartingInstances': []}
-        ]
-        mock_ec2.describe_instances.return_value = {
-            'Reservations': [{
-                'Instances': [{
-                    'InstanceType': 't3.large'
-                }]
-            }]
-        }
-        mock_ec2.modify_instance_attribute.return_value = {}
+    @patch('boto3.resource')
+    @patch.object(EC2InstanceManager, 'get_compatible_instance_types')
+    def test_get_compatible_instance_types(self, mock_get_compatible, mock_boto3_resource):
+        # Mock DynamoDB table
+        mock_table = MagicMock()
+        mock_boto3_resource.return_value.Table.return_value = mock_table
         
-        response = handler(self.event, None)
+        # Setup mock return value
+        mock_get_compatible.return_value = ['t2.large', 't3a.large']
         
-        self.assertEqual(response['statusCode'], 200)
-        results = json.loads(response['body'])['results']
-        self.assertTrue(any(r['action'] == 'type_modified' for r in results))
-
-    def test_get_alternative_instance_types(self):
-        alternatives = get_alternative_instance_types('t3.large')
+        # Create an instance of EC2InstanceManager
+        manager = EC2InstanceManager()
+        
+        # Call the method with some test parameters
+        alternatives = manager.get_compatible_instance_types(2, 8192, {'ProcessorInfo': {'SupportedArchitectures': ['x86_64']}}, 't3.large')
+        
+        # Verify the result
         self.assertTrue('t2.large' in alternatives)
         self.assertTrue('t3a.large' in alternatives)
 

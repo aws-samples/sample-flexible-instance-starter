@@ -4,11 +4,13 @@ import os
 import boto3
 from botocore.exceptions import ClientError
 from typing import List, Dict, Any
+from datetime import datetime, timedelta
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 region = os.environ.get('AWS_REGION')
+dedup_table_name = os.environ.get('DEDUP_TABLE_NAME', 'StartInstancesFailures')
 class EC2InstanceManager:
     def __init__(self):
         self.region = region
@@ -184,6 +186,34 @@ def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
     """Lambda handler function"""
     logger.info(f"Received event: {json.dumps(event)}")
     
+    detail = event['detail']
+    
+    # Use session context creationDate as the deduplication key
+    # This will be consistent across retry attempts in the same session
+    dedup_key = f"{detail['userIdentity']['principalId']}#{detail['sessionContext']['attributes']['creationDate']}"
+    
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(dedup_table_name)
+    
+    try:
+        table.put_item(
+            Item={
+                'dedupKey': dedup_key,
+                'timestamp': detail['eventTime'],
+                'ttl': int((datetime.now() + timedelta(minutes=5)).timestamp())
+            },
+            ConditionExpression='attribute_not_exists(dedupKey)'
+        )
+      
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        logger.info("This is a duplicate event. Skipping.")
+        return {
+            'statusCode': 200,
+            'body': 'Duplicate event, skipped processing'
+        }
+    
+    logger.info("This is a unique event, continuing processing...")
+
     try:
         # Extract instance IDs from the failed StartInstances call
         detail = event.get('detail', {})
