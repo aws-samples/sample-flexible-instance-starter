@@ -94,13 +94,14 @@ class EC2InstanceManager:
             
             # Get instance tags
             tags = {tag['Key']: tag['Value'] for tag in instance.tags or []}
+            flexible = tags.get('flexible', 'false').lower()
             
             # Log instance details and flexibility status
             logger.info(f"Processing instance {instance_id}: {instance.instance_type}")
-            logger.info(f"Flexible flag: {tags.get('Flexible', '0')}")
+            logger.info(f"Flexible flag: {flexible}")
 
             # Check if instance is flexible and has original type
-            if tags.get('Flexible') == '1':
+            if flexible == 'true':
                 if 'OriginalType' in tags:
                     original_type = tags['OriginalType']
                     current_type = instance.instance_type
@@ -113,8 +114,6 @@ class EC2InstanceManager:
                     if not self._is_valid_instance_type(original_type):
                         logger.error(f"Invalid instance type in OriginalType tag: {original_type}")
                         return None
-
-                    logger.error(f"Test")
                     
                     # Only modify if types are different
                     if original_type != current_type:
@@ -122,7 +121,6 @@ class EC2InstanceManager:
                         
                         # Wait for instance to be in stopped state before modifying
                         stopped, current_state = self.wait_for_instance_stopped(instance_id)
-                        logger.error(f"Instance {stopped} {current_state}")
                         if not stopped and current_state != 'terminated':
                             logger.error(f"Instance {instance_id} did not reach stopped state in time")
                             return None
