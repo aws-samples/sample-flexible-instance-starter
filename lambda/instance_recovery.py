@@ -113,12 +113,20 @@ class EC2InstanceManager:
     def start_instance_with_fallback(self, instance_id: str) -> bool:
         """
         Attempt to start an EC2 instance, falling back to different instance types if needed.
+        Only processes instances with the 'flexible' tag set to 'true'.
         Returns True if successfully started, False otherwise.
         """
         try:
             # Get current instance details
-            instance_details = self.get_instance_details(instance_id)
             instance = self.ec2_resource.Instance(instance_id)
+            
+            # Check if instance has the flexible tag set to true
+            instance_tags = {tag['Key']: tag['Value'] for tag in instance.tags or []}
+            if instance_tags.get('flexible', '').lower() != 'true':
+                logger.info(f"Instance {instance_id} does not have flexible=true tag. Skipping recovery.")
+                return False
+                
+            instance_details = self.get_instance_details(instance_id)
             tags = instance.create_tags(
                 Tags=[
                     {
@@ -205,9 +213,9 @@ def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
         instance_id = item.get('instanceId')
         if not instance_id:
             continue          
-        # Use session context creationDate as the deduplication key
-        # This will be consistent across retry attempts in the same session
-        dedup_key = f"{detail['userIdentity']['principalId']}#{detail['userIdentity']['sessionContext']['attributes']['creationDate']}#{item}"
+        # Use instance id as the deduplication key
+        # This will be consistent across retry attempts within the ttl (5 minutes)
+        dedup_key = f"item"
 
     
         try:

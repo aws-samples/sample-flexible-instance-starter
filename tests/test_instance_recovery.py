@@ -66,6 +66,51 @@ class TestInstanceRecovery(unittest.TestCase):
         mock_table.put_item.assert_called_once()
 
     @patch('boto3.resource')
+    def test_start_instance_with_fallback_flexible_tag(self, mock_boto3_resource):
+        # Create mock instance
+        mock_instance = MagicMock()
+        mock_instance.tags = [{'Key': 'flexible', 'Value': 'true'}]
+        mock_instance.instance_type = 't3.micro'
+        mock_instance.start.return_value = None
+        
+        # Mock EC2 resource and client
+        mock_ec2_resource = MagicMock()
+        mock_ec2_resource.Instance.return_value = mock_instance
+        mock_boto3_resource.return_value = mock_ec2_resource
+        
+        # Create instance manager and test
+        manager = EC2InstanceManager()
+        manager.get_instance_details = MagicMock(return_value={
+            'instance_type': 't3.micro',
+            'instance_type_info': {'ProcessorInfo': {'SupportedArchitectures': ['x86_64']}},
+            'vcpu': 2,
+            'memory_mib': 1024,
+            'ondemand_price': 0.0104
+        })
+        
+        result = manager.start_instance_with_fallback('i-1234567890abcdef0')
+        self.assertTrue(result)
+        mock_instance.start.assert_called_once()
+
+    @patch('boto3.resource')
+    def test_start_instance_with_fallback_no_flexible_tag(self, mock_boto3_resource):
+        # Create mock instance without flexible tag
+        mock_instance = MagicMock()
+        mock_instance.tags = [{'Key': 'other', 'Value': 'value'}]
+        
+        # Mock EC2 resource
+        mock_ec2_resource = MagicMock()
+        mock_ec2_resource.Instance.return_value = mock_instance
+        mock_boto3_resource.return_value = mock_ec2_resource
+        
+        # Create instance manager and test
+        manager = EC2InstanceManager()
+        result = manager.start_instance_with_fallback('i-1234567890abcdef0')
+        
+        self.assertFalse(result)
+        mock_instance.start.assert_not_called()
+
+    @patch('boto3.resource')
     @patch.object(EC2InstanceManager, 'get_compatible_instance_types')
     def test_get_compatible_instance_types(self, mock_get_compatible, mock_boto3_resource):
         # Mock DynamoDB table

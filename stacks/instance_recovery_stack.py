@@ -29,7 +29,7 @@ class InstanceRecoveryStack(Stack):
         )
 
         # Create Lambda function
-        handler = lambda_.Function(
+        start_handler = lambda_.Function(
             self, "InstanceRecoveryHandler",
             runtime=lambda_.Runtime.PYTHON_3_9,
             code=lambda_.Code.from_asset("lambda"),
@@ -40,10 +40,11 @@ class InstanceRecoveryStack(Stack):
                 "LOG_LEVEL": "INFO",
                 "DEDUP_TABLE_NAME": dedup_table.table_name
             }
+            log_retention=logs.RetentionDays.ONE_MONTH
         )
 
         # Add IAM permissions
-        handler.add_to_role_policy(iam.PolicyStatement(
+        start_handler.add_to_role_policy(iam.PolicyStatement(
             actions=[
                 "ec2:StartInstances",
                 "ec2:DescribeInstances",
@@ -55,7 +56,7 @@ class InstanceRecoveryStack(Stack):
             ],
             resources=["*"]
         ))
-        handler.add_to_role_policy(iam.PolicyStatement(
+        start_handler.add_to_role_policy(iam.PolicyStatement(
             actions=[
                 "pricing:GetProducts"
             ],
@@ -63,7 +64,7 @@ class InstanceRecoveryStack(Stack):
         ))
         
         # Grant DynamoDB permissions to Lambda
-        dedup_table.grant_read_write_data(handler)
+        dedup_table.grant_read_write_data(start_handler)
 
         # Create CloudWatch Event Rule
         rule = events.Rule(
@@ -86,7 +87,7 @@ class InstanceRecoveryStack(Stack):
         )
 
         # Add Lambda as target
-        rule.add_target(targets.LambdaFunction(handler))
+        rule.add_target(targets.LambdaFunction(start_handler))
 
         # Create Stop Lambda function
         stop_handler = lambda_.Function(
