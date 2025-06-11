@@ -216,7 +216,7 @@ def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
             continue          
         # Use instance id as the deduplication key
         # This will be consistent across retry attempts within the ttl (5 minutes)
-        dedup_key = f"item"
+        dedup_key = f"{item}"
 
     
         try:
