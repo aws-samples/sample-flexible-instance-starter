@@ -1,2 +1,3 @@
 cdk.out/
-stacks/__pycache__
+stacks/__pycache__/
+stacks/__pycache__/instance_recovery_stack.cpython-313.pyc

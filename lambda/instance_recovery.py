@@ -186,54 +186,50 @@ def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
     """Lambda handler function"""
     logger.info(f"Received event: {json.dumps(event)}")
     
-    detail = event['detail']
-    
-    # Use session context creationDate as the deduplication key
-    # This will be consistent across retry attempts in the same session
-    dedup_key = f"{detail['userIdentity']['principalId']}#{detail['sessionContext']['attributes']['creationDate']}"
+    detail = event.get('detail', {})
+    request_parameters = detail.get('requestParameters', {})
+    instance_ids = request_parameters.get('instancesSet', {}).get('items', [])
+    if not instance_ids:
+        logger.error("No instance IDs found in the event")
+        return {'statusCode': 400, 'body': 'No instance IDs found'}
     
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table(dedup_table_name)
-    
-    try:
-        table.put_item(
-            Item={
-                'dedupKey': dedup_key,
-                'timestamp': detail['eventTime'],
-                'ttl': int((datetime.now() + timedelta(minutes=5)).timestamp())
-            },
-            ConditionExpression='attribute_not_exists(dedupKey)'
-        )
-      
-    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
-        logger.info("This is a duplicate event. Skipping.")
-        return {
-            'statusCode': 200,
-            'body': 'Duplicate event, skipped processing'
-        }
-    
-    logger.info("This is a unique event, continuing processing...")
 
-    try:
-        # Extract instance IDs from the failed StartInstances call
-        detail = event.get('detail', {})
-        request_parameters = detail.get('requestParameters', {})
-        instance_ids = request_parameters.get('instancesSet', {}).get('items', [])
+    results = []
         
-        if not instance_ids:
-            logger.error("No instance IDs found in the event")
-            return {'statusCode': 400, 'body': 'No instance IDs found'}
+    instance_manager = EC2InstanceManager()
+    
+    # Process each instance separately
+    for item in instance_ids:
+        instance_id = item.get('instanceId')
+        if not instance_id:
+            continue          
+        # Use session context creationDate as the deduplication key
+        # This will be consistent across retry attempts in the same session
+        dedup_key = f"{detail['userIdentity']['principalId']}#{detail['userIdentity']['sessionContext']['attributes']['creationDate']}#{item}"
 
-        results = []
+    
+        try:
+            table.put_item(
+                Item={
+                    'dedupKey': dedup_key,
+                    'timestamp': detail['eventTime'],
+                    'ttl': int((datetime.now() + timedelta(minutes=5)).timestamp())
+                },
+                ConditionExpression='attribute_not_exists(dedupKey)'
+            )
         
-        instance_manager = EC2InstanceManager()
+        except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+            logger.info("This is a duplicate event. Skipping.")
+            return {
+                'statusCode': 200,
+                'body': 'Duplicate event, skipped processing'
+            }
+        
+        logger.info("This is a unique event, continuing processing...")
 
-        # Process each instance separately
-        for item in instance_ids:
-            instance_id = item.get('instanceId')
-            if not instance_id:
-                continue
-                
+        try:
             # Try to start the instance
             if instance_manager.start_instance_with_fallback(instance_id):
                 results.append({
@@ -243,20 +239,20 @@ def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
                 })
                 continue
 
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'message': 'Processing complete',
-                'results': results
-            })
-        }
+            return {
+                'statusCode': 200,
+                'body': json.dumps({
+                    'message': 'Processing complete',
+                    'results': results
+                })
+            }
         
-    except Exception as e:
-        logger.error(f"Error processing event: {str(e)}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'message': 'Error processing event',
-                'error': str(e)
-            })
-        }
+        except Exception as e:
+            logger.error(f"Error processing event: {str(e)}")
+            return {
+                'statusCode': 500,
+                'body': json.dumps({
+                    'message': 'Error processing event',
+                    'error': str(e)
+                })
+            }
