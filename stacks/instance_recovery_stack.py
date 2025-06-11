@@ -39,7 +39,7 @@ class InstanceRecoveryStack(Stack):
             environment={
                 "LOG_LEVEL": "INFO",
                 "DEDUP_TABLE_NAME": dedup_table.table_name
-            }
+            },
             log_retention=logs.RetentionDays.ONE_MONTH
         )
 

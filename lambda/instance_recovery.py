@@ -89,8 +89,9 @@ class EC2InstanceManager:
                         'Min': memory_mib,
                         'Max': 2 * memory_mib
                     },
-                    'BurstablePerformance': 'included' if is_burstable else 'included',
-                    'InstanceGenerations': ['current']
+                    'BurstablePerformance': 'included' if is_burstable else 'excluded',
+                    'InstanceGenerations': ['current'],
+                    'BareMetal': 'included'
                 }
                 #MaxResults=0  # Adjust as needed
             )
