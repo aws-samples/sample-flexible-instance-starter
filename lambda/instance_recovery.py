@@ -89,8 +89,9 @@ class EC2InstanceManager:
                         'Min': memory_mib,
                         'Max': 2 * memory_mib
                     },
-                    'BurstablePerformance': 'included' if is_burstable else 'included',
-                    'InstanceGenerations': ['current']
+                    'BurstablePerformance': 'included' if is_burstable else 'excluded',
+                    'InstanceGenerations': ['current'],
+                    'BareMetal': 'included'
                 }
                 #MaxResults=0  # Adjust as needed
             )
@@ -215,7 +216,7 @@ def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
             continue          
         # Use instance id as the deduplication key
         # This will be consistent across retry attempts within the ttl (5 minutes)
-        dedup_key = f"item"
+        dedup_key = f"{item}"
 
     
         try:
