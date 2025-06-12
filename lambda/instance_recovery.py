@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import boto3
+import ast
 from botocore.exceptions import ClientError
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
@@ -57,7 +58,7 @@ class EC2InstanceManager:
             )
 
             for price_str in response['PriceList']:
-                price_data = eval(price_str)  # Convert string to dict
+                price_data = ast.literal_eval(price_str)  # Convert string to dict
                 terms = price_data['terms']['OnDemand']
                 # Get the first price dimension from the first term
                 term_id = list(terms.keys())[0]
@@ -213,10 +214,27 @@ def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
     for item in instance_ids:
         instance_id = item.get('instanceId')
         if not instance_id:
-            continue          
+            continue 
+
+        current_time = int(datetime.now().timestamp())
+        try:
+            response = table.get_item(Key={'dedupKey': instance_id})
+            if 'Item' in response:
+                if response['Item']['ttl'] > current_time:
+                    logger.info(f"{response['Item']['ttl']}, {current_time}")
+                    logger.info(f"Duplicate event detected for instance {instance_id}. Skipping.")
+                    continue
+                else: 
+                    logger.info(f"Old event detected for instance {instance_id}. Processing and updating TTL.")
+        except ClientError as e:
+            logger.error(f"Error checking DynamoDB for existing event: {e}")
+            continue
+
+
+
         # Use instance id as the deduplication key
         # This will be consistent across retry attempts within the ttl (5 minutes)
-        dedup_key = f"{item}"
+        dedup_key = instance_id
 
     
         try:
@@ -225,18 +243,14 @@ def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
                     'dedupKey': dedup_key,
                     'timestamp': detail['eventTime'],
                     'ttl': int((datetime.now() + timedelta(minutes=5)).timestamp())
-                },
-                ConditionExpression='attribute_not_exists(dedupKey)'
+                }
             )
         
-        except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
-            logger.info("This is a duplicate event. Skipping.")
-            return {
-                'statusCode': 200,
-                'body': 'Duplicate event, skipped processing'
-            }
+        except ClientError as e:
+            logger.error(f"Error putting new event into DynamoDB: {e}")
+            continue
         
-        logger.info("This is a unique event, continuing processing...")
+        logger.info("TTL set, continuing processing...")
 
         try:
             # Try to start the instance
