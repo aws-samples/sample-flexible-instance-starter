@@ -12,6 +12,20 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 region = os.environ.get('AWS_REGION')
 dedup_table_name = os.environ.get('DEDUP_TABLE_NAME', 'StartInstancesFailures')
+
+# Define instance families to exclude from fallback options
+# Set to empty list if no instances should be excluded
+EXCLUDED_INSTANCE_FAMILIES = [
+    # 'c7gd',    # Graviton-based compute optimized with local SSD
+    # 'u-',
+]
+
+# Memory buffer percentage - allows instances with less memory than original
+# Set to 0 for no buffer (exact memory match or higher)
+# Example: se 10 for 10% buffer
+MEMORY_BUFFER_PERCENTAGE = 0
+
+
 class EC2InstanceManager:
     def __init__(self):
         self.region = region
@@ -97,116 +111,107 @@ class EC2InstanceManager:
                 #MaxResults=0  # Adjust as needed
             )
             
-            # Get instance types with their prices
+            # Get instance types with their prices, filtering out excluded families
             instance_types_with_prices = []
             for instance in response['InstanceTypes']:
                 instance_type = instance['InstanceType']
+                
+                # Check if instance type should be excluded
+                should_exclude = False
+                for excluded_family in EXCLUDED_INSTANCE_FAMILIES:
+                    if instance_type.startswith(excluded_family):
+                        should_exclude = True
+                        logger.debug(f"Excluding instance type {instance_type} (matches excluded family: {excluded_family})")
+                        break
+                
+                if should_exclude:
+                    continue
+                    
                 price = self.get_ondemand_price(instance_type)
                 instance_types_with_prices.append((instance_type, price))
             
             # Sort by price and return just the instance types
             sorted_instances = sorted(instance_types_with_prices, key=lambda x: x[1]) # Sort by price (second element in tuple)
+            
+            logger.info(f"Found {len(sorted_instances)} compatible instance types after filtering")
             return [instance_type for instance_type, _ in sorted_instances] # Return list of just the instance types
             
         except ClientError as e:
             logger.error(f"Error getting compatible instance types: {e}")
             return []
 
-    def start_instance_with_fallback(self, instance_id: str) -> bool:
-        """
-        Attempt to start an EC2 instance, falling back to different instance types if needed.
-        Only processes instances with the 'flexible' tag set to 'true'.
-        Returns True if successfully started, False otherwise.
-        """
+
+    def get_compatible_instance_types(self, vcpu: int, memory_mib: int, instance_type_info: Dict[str, Any], original_instance_type: str) -> List[str]:
+        """Get compatible instance types based on original instance properties and requirements, sorted by on-demand price."""
+        original_architecture = instance_type_info['ProcessorInfo']['SupportedArchitectures'][0]
+        is_burstable = original_instance_type.startswith('t')
+        
+        # Calculate minimum memory with buffer (if any)
+        if MEMORY_BUFFER_PERCENTAGE > 0:
+            memory_buffer_multiplier = (100 - MEMORY_BUFFER_PERCENTAGE) / 100
+            min_memory_mib = int(memory_mib * memory_buffer_multiplier)
+            logger.info(f"Original memory: {memory_mib} MiB, Buffer: {MEMORY_BUFFER_PERCENTAGE}%, Min memory: {min_memory_mib} MiB")
+        else:
+            min_memory_mib = memory_mib
+            logger.info(f"Original memory: {memory_mib} MiB, No buffer applied")
+        
         try:
-            # Get current instance details
-            instance = self.ec2_resource.Instance(instance_id)
+            response = self.ec2_client.get_instance_types_from_instance_requirements(
+                ArchitectureTypes=[original_architecture],
+                VirtualizationTypes=['hvm'],
+                InstanceRequirements={
+                    'VCpuCount': {
+                        'Min': vcpu,
+                        'Max': 2 * vcpu
+                    },
+                    'MemoryMiB': {
+                        'Min': min_memory_mib,
+                        'Max': 2 * memory_mib
+                    },
+                    'BurstablePerformance': 'included' if is_burstable else 'excluded',
+                    'InstanceGenerations': ['current'],
+                    'BareMetal': 'included'
+                }
+                #MaxResults=0  # Adjust as needed
+            )
             
-            # Check if instance has the flexible tag set to true
-            instance_tags = {tag['Key']: tag['Value'] for tag in instance.tags or []}
-            if instance_tags.get('flexible', '').lower() != 'true':
-                logger.info(f"Instance {instance_id} does not have flexible=true tag. Skipping recovery.")
-                return False
+            # Get instance types with their prices, filtering out excluded families (if any)
+            instance_types_with_prices = []
+            excluded_count = 0
+            
+            for instance in response['InstanceTypes']:
+                instance_type = instance['InstanceType']
                 
-            instance_details = self.get_instance_details(instance_id)
-            tags = instance.create_tags(
-                Tags=[
-                    {
-                        'Key': 'OriginalType',
-                        'Value': instance_details['instance_type']
-                    }
-                ]
-            )
-
-            # First attempt to start with current instance type
-            try:
-                logger.info(f"Attempting to start instance {instance_id} with current type {instance_details['instance_type']}")
-                instance.start()
-                # instance.wait_until_running()
-                logger.info(f"Successfully started instance {instance_id}")
-                return True
-            except ClientError as e:
-                if 'InsufficientInstanceCapacity' not in str(e):
-                    logger.error(f"Error starting instance: {e}")
-                    return False
-                else:
-                    logger.info(f"Attempt with type {instance_details['instance_type']} resulted in InsufficientInstanceCapacity error")
-
-            
-            # If we get here, we need to try different instance types
-            compatible_types = self.get_compatible_instance_types(
-                instance_details['vcpu'],
-                instance_details['memory_mib'],
-                instance_type_info=instance_details['instance_type_info'],
-                original_instance_type=instance_details['instance_type']
-            )
-
-            logger.info(f"Original instance type {instance_details['instance_type']}")
-            logger.info(f"We will attempt to start the instance with the following instance types: {compatible_types}")
-            
-            for new_type in compatible_types:
-                if new_type == instance_details['instance_type']:
-                    continue  # Skip current type as we already tried it
-                    
-                try:
-                    logger.info(f"Attempting to modify instance type to {new_type}")
-                    instance.modify_attribute(
-                        InstanceType={
-                            'Value': new_type
-                        }
-                    )
-                    
-                    # Try to start with new instance type
-                    instance.start()
-                    # instance.wait_until_running()
-                    logger.info(f"Successfully started instance {instance_id} with new type {new_type}")
-                    return True
-                except ClientError as e:
-                    logger.info(f"Failed to start with instance type {new_type}: {e}")
+                # Check if instance type should be excluded (only if exclusions are defined)
+                should_exclude = False
+                if EXCLUDED_INSTANCE_FAMILIES:  # Only check if list is not empty
+                    for excluded_family in EXCLUDED_INSTANCE_FAMILIES:
+                        if instance_type.startswith(excluded_family):
+                            should_exclude = True
+                            excluded_count += 1
+                            logger.debug(f"Excluding instance type {instance_type} (matches excluded family: {excluded_family})")
+                            break
+                
+                if should_exclude:
                     continue
+                    
+                price = self.get_ondemand_price(instance_type)
+                instance_types_with_prices.append((instance_type, price))
             
-            logger.error(f"Failed to start instance {instance_id} with any compatible instance type")
-            return False
+            # Sort by price and return just the instance types
+            sorted_instances = sorted(instance_types_with_prices, key=lambda x: x[1]) # Sort by price (second element in tuple)
+            
+            if excluded_count > 0:
+                logger.info(f"Found {len(sorted_instances)} compatible instance types after excluding {excluded_count} instances")
+            else:
+                logger.info(f"Found {len(sorted_instances)} compatible instance types (no exclusions applied)")
                 
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            return False
+            return [instance_type for instance_type, _ in sorted_instances] # Return list of just the instance types
+            
+        except ClientError as e:
+            logger.error(f"Error getting compatible instance types: {e}")
+            return []
 
-def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
-    """Lambda handler function"""
-    logger.info(f"Received event: {json.dumps(event)}")
-    
-    detail = event.get('detail', {})
-    request_parameters = detail.get('requestParameters', {})
-    instance_ids = request_parameters.get('instancesSet', {}).get('items', [])
-    if not instance_ids:
-        logger.error("No instance IDs found in the event")
-        return {'statusCode': 400, 'body': 'No instance IDs found'}
-    
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(dedup_table_name)
-
-    results = []
         
     instance_manager = EC2InstanceManager()
     
