@@ -7,8 +7,9 @@ from botocore.exceptions import ClientError
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
 
-with open('config.json') as json_data:
-    config = json.loads(json_data)
+script_dir = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(script_dir, 'config.json')) as json_data:
+    config = json.load(json_data)
 
 current_config = config['default']
 
