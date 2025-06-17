@@ -7,6 +7,11 @@ from botocore.exceptions import ClientError
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
 
+with open('config.json') as json_data:
+    config = json.loads(json_data)
+
+current_config = config['default']
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
@@ -77,6 +82,17 @@ class EC2InstanceManager:
         """Get compatible instance types based on original instance properties and requirements, sorted by on-demand price."""
         original_architecture = instance_type_info['ProcessorInfo']['SupportedArchitectures'][0]
         is_burstable = original_instance_type.startswith('t')
+        
+        # Calculate minimum memory with buffer (if any)
+        memoryBufferPercentage = current_config.get('memoryBufferPercentage', 0)
+        if memoryBufferPercentage > 0:
+            memory_buffer_multiplier = (100 - memoryBufferPercentage) / 100
+            min_memory_mib = int(memory_mib * memory_buffer_multiplier)
+            logger.info(f"Original memory: {memory_mib} MiB, Buffer: {memoryBufferPercentage}%, Min memory: {min_memory_mib} MiB")
+        else:
+            min_memory_mib = memory_mib
+            logger.info(f"Original memory: {memory_mib} MiB, No buffer applied")
+            
         try:
             response = self.ec2_client.get_instance_types_from_instance_requirements(
                 ArchitectureTypes=[original_architecture],
@@ -92,7 +108,10 @@ class EC2InstanceManager:
                     },
                     'BurstablePerformance': 'included' if is_burstable else 'excluded',
                     'InstanceGenerations': ['current'],
-                    'BareMetal': 'included'
+                    'BareMetal': 'included',
+                    'CpuManufacturers': current_config.get('cpuManufacturers', ['amazon-web-services', 'amd', 'intel', 'apple']),
+                    'ExcludedInstanceTypes': current_config.get('excludedInstanceTypes', [])
+
                 }
                 #MaxResults=0  # Adjust as needed
             )
