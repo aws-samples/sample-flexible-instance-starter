@@ -104,7 +104,7 @@ class EC2InstanceManager:
                         'Max': 2 * vcpu
                     },
                     'MemoryMiB': {
-                        'Min': memory_mib,
+                        'Min': min_memory_mib,
                         'Max': 2 * memory_mib
                     },
                     'BurstablePerformance': 'included' if is_burstable else 'excluded',
