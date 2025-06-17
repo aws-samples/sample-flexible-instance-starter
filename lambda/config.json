@@ -1,0 +1,8 @@
+{
+    "version": 1,
+    "default": {
+        "memoryBufferPercentage": 5,
+        "cpuManufacturers": ["intel"],
+        "excludedInstanceTypes": []
+    }
+}
