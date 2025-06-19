@@ -4,6 +4,8 @@
         "memoryBufferPercentage": 5,
         "cpuManufacturers": ["intel"],
         "excludedInstanceTypes": [],
-        "bareMetal": "included"
+        "bareMetal": "included",
+        "acceleratorCountMin": 0,
+        "acceleratorCountMax": 0
     }
 }

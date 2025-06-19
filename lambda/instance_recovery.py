@@ -112,6 +112,10 @@ class EC2InstanceManager:
                     'BareMetal': current_config.get('bareMetal', 'included'),
                     'CpuManufacturers': current_config.get('cpuManufacturers', ['amazon-web-services', 'amd', 'intel', 'apple']),
                     'ExcludedInstanceTypes': current_config.get('excludedInstanceTypes',)
+                    'AcceleratorCount': { 
+                        'Min': current_config.get('acceleratorCountMin', 0),
+                        'Max': current_config.get('acceleratorCountMax', 0)
+                    },
                 }
                 #MaxResults=0  # Adjust as needed
             )
