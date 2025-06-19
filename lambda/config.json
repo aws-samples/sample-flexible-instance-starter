@@ -4,6 +4,6 @@
         "memoryBufferPercentage": 5,
         "cpuManufacturers": ["intel"],
         "excludedInstanceTypes": [],
-        "bareMetal": "include"
+        "bareMetal": "included"
     }
 }
