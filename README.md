@@ -73,18 +73,64 @@ cdk deploy
    - Remoevs the OriginalType Tag on the EC2 instance
    - Logs all actions and results
 
-## Configuration
+## Configuration Parameters
 
-Parameters can be configured in the `lambda/config.json`:
-- memoryBufferPercentage: This parameter controls the memory allocation matching process. The tool compares the current instance specifications with potential new instances. By default, it selects new instances with memory equal to or greater than the current allocation. The buffer allows you to set a percentage that permits selecting instances with slightly less memory than the current instance. This provides more flexibility in instance selection while still meeting performance requirements. Default value: **5%**
-- cpuManufacturers: Allows to specify the manufacture of the cpu on the target instances. Cpu from a different manufacture will be skipped. Default value **Intel**
-- excludedInstanceTypes: The parameter allow to select entire families that will be skipped from the selection. You can use strings with one or more wild cards, represented by an asterisk (*), to exclude an instance family, type, size, or generation. The following are examples: m5.8xlarge, c5*.*, m5a.*, r*, *3*.
-For example, if you specify c5*,Amazon EC2 will exclude the entire C5 instance family, which includes all C5a and C5n instance types. If you specify m5a.*, Amazon EC2 will exclude all the M5a instance types, but not the M5n instance types.
-- bareMetal: Indicates whether bare metal instance types must be included, excluded, or required.
-   - To include bare metal instance types, specify included.
-   - To require only bare metal instance types, specify required.
-   - To exclude bare metal instance types, specify excluded.
-   Defalt value: **include**
+Parameters can be configured in `lambda/config.json`:
+
+### `memoryBufferPercentage`
+Controls memory allocation flexibility during instance matching. By default, the tool selects instances with memory equal to or greater than the current allocation. This buffer allows selecting instances with slightly less memory, providing more flexibility while maintaining performance requirements.
+
+- **Type:** Integer (percentage)
+- **Default:** `5`
+- **Example:** With 5% buffer, an 8GB instance could match a 7.6GB target instance
+
+### `cpuManufacturers`
+Specifies allowed CPU manufacturers for target instances. Instances with CPUs from unlisted manufacturers will be excluded from selection.
+
+- **Type:** Array of strings
+- **Default:** `["intel"]`
+- **Valid options:** `"intel"`, `"amd"`, `"amazon-web-services"`, `"apple"`
+- **Example:** `["intel", "amd"]` allows both Intel and AMD processors
+
+### `excludedInstanceTypes`
+Excludes specific instance families, types, or generations from selection. Supports wildcard patterns using asterisk (`*`) for flexible matching.
+
+- **Type:** Array of strings
+- **Default:** `[]` (empty - no exclusions)
+- **Wildcard examples:**
+  - `"m5.8xlarge"` - Excludes specific instance type
+  - `"c5*"` - Excludes entire C5 family (including C5a, C5n)
+  - `"m5a.*"` - Excludes all M5a sizes, but allows M5n
+  - `"r*"` - Excludes all R-family instances
+  - `"*3*"` - Excludes all 3rd generation instances
+
+### `bareMetal`
+Controls inclusion of bare metal instance types in the selection process.
+
+- **Type:** String
+- **Default:** `"included"`
+- **Options:**
+  - `"included"` - Include bare metal instances in selection
+  - `"required"` - Only consider bare metal instances
+  - `"excluded"` - Skip all bare metal instances
+
+---
+
+### Example Configuration
+
+```json
+{
+    "version": 1,
+    "default": {
+        "memoryBufferPercentage": 10,
+        "cpuManufacturers": ["intel", "amd"],
+        "excludedInstanceTypes": ["t2.*", "t3.*", "m4*"],
+        "bareMetal": "excluded"
+    }
+}
+```
+
+**Note:** Configuration changes require redeploying the Lambda function to take effect.
 
 
 ## Monitoring
