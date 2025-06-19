@@ -75,7 +75,17 @@ cdk deploy
 
 ## Configuration
 
-The instance type mappings can be modified in the Lambda function code (`lambda/instance_recovery.py`). The current mappings include common EC2 instance families, but you can add more based on your needs.
+Parameters can be configured in the `lambda/config.json`:
+- memoryBufferPercentage: This parameter controls the memory allocation matching process. The tool compares the current instance specifications with potential new instances. By default, it selects new instances with memory equal to or greater than the current allocation. The buffer allows you to set a percentage that permits selecting instances with slightly less memory than the current instance. This provides more flexibility in instance selection while still meeting performance requirements. Default value: **5%**
+- cpuManufacturers: Allows to specify the manufacture of the cpu on the target instances. Cpu from a different manufacture will be skipped. Default value **Intel**
+- excludedInstanceTypes: The parameter allow to select entire families that will be skipped from the selection. You can use strings with one or more wild cards, represented by an asterisk (*), to exclude an instance family, type, size, or generation. The following are examples: m5.8xlarge, c5*.*, m5a.*, r*, *3*.
+For example, if you specify c5*,Amazon EC2 will exclude the entire C5 instance family, which includes all C5a and C5n instance types. If you specify m5a.*, Amazon EC2 will exclude all the M5a instance types, but not the M5n instance types.
+- bareMetal: Indicates whether bare metal instance types must be included, excluded, or required.
+   - To include bare metal instance types, specify included.
+   - To require only bare metal instance types, specify required.
+   - To exclude bare metal instance types, specify excluded.
+   Defalt value: **include**
+
 
 ## Monitoring
 

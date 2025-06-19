@@ -109,10 +109,9 @@ class EC2InstanceManager:
                     },
                     'BurstablePerformance': 'included' if is_burstable else 'excluded',
                     'InstanceGenerations': ['current'],
-                    'BareMetal': 'included',
+                    'BareMetal': current_config.get('bareMetal', 'included'),
                     'CpuManufacturers': current_config.get('cpuManufacturers', ['amazon-web-services', 'amd', 'intel', 'apple']),
-                    'ExcludedInstanceTypes': current_config.get('excludedInstanceTypes', [])
-
+                    'ExcludedInstanceTypes': current_config.get('excludedInstanceTypes',)
                 }
                 #MaxResults=0  # Adjust as needed
             )
