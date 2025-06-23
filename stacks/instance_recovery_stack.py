@@ -54,7 +54,7 @@ class InstanceRecoveryStack(Stack):
         start_handler = lambda_.Function(
             self, "InstanceRecoveryHandler",
             runtime=lambda_.Runtime.PYTHON_3_13,
-            code=lambda_.Code.from_asset("lambda"),
+            code=lambda_.Code.from_asset("lambda_start"),
             handler="instance_recovery.handler",
             timeout=Duration.minutes(5),
             memory_size=256,
@@ -165,10 +165,9 @@ class InstanceRecoveryStack(Stack):
         stop_rule = events.Rule(
             self, "StopInstancesResetRule",
             event_pattern=events.EventPattern(
-                detail_type=["AWS API Call via CloudTrail"],
+                detail_type=["EC2 Instance State-change Notification"],
                 detail={
-                    "eventSource": ["ec2.amazonaws.com"],
-                    "eventName": ["StopInstances"]
+                    "state": ["stopped"]
                 }
             )
         )
