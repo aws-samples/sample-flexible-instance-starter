@@ -38,7 +38,7 @@ class EC2InstanceManager:
                 return False
             raise
 
-    def wait_for_instance_stopped(self, instance_id: str, max_attempts: int = 30) -> tuple[bool, str]:
+    def wait_for_instance_stopped(self, instance_id: str, max_attempts: int = 90) -> tuple[bool, str]:
         """
         Wait for an instance to reach the 'stopped' state.
         
@@ -162,31 +162,24 @@ def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
     try:
         # Extract instance IDs from the failed StopInstances call
         detail = event.get('detail', {})
-        request_parameters = detail.get('requestParameters', {})
-        instance_ids = request_parameters.get('instancesSet', {}).get('items', [])
+        instance_id = detail.get('instance-id')
         
-        if not instance_ids:
-            logger.error("No instance IDs found in the event")
-            return {'statusCode': 400, 'body': 'No instance IDs found'}
+        if not instance_id:
+            logger.error("No instance ID found in the event")
+            return {'statusCode': 400, 'body': 'No instance ID found'}
 
         results = []
         
         instance_manager = EC2InstanceManager()
-
-        # Process each instance separately
-        for item in instance_ids:
-            instance_id = item.get('instanceId')
-            if not instance_id:
-                continue
                 
-            # Reset Instance Type if it was changed by this automation
-            result = instance_manager.reset_instance_type(instance_id)
-            if result:
-                results.append({
-                    'instanceId': result.get('instance_id'),
-                    'instanceType': result.get('instance_type'),
-                    'newInstanceType': result.get('new_instance_type')
-                })
+        # Reset Instance Type if it was changed by this automation
+        result = instance_manager.reset_instance_type(instance_id)
+        if result:
+            results.append({
+                'instanceId': result.get('instance_id'),
+                'instanceType': result.get('instance_type'),
+                'newInstanceType': result.get('new_instance_type')
+            })
 
         return {
             'statusCode': 200,

@@ -5,25 +5,23 @@ import boto3
 import ast
 from botocore.exceptions import ClientError
 from typing import List, Dict, Any
-from datetime import datetime, timedelta
-
-script_dir = os.path.dirname(os.path.abspath(__file__))
-with open(os.path.join(script_dir, 'config.json')) as json_data:
-    config = json.load(json_data)
-
-current_config = config['default']
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
-region = os.environ.get('AWS_REGION')
-dedup_table_name = os.environ.get('DEDUP_TABLE_NAME', 'StartInstancesFailures')
+
+
 class EC2InstanceManager:
-    def __init__(self):
+    def __init__(self, region, config_path):
         self.region = region
         self.ec2_client = boto3.client('ec2', region_name=region)
         self.ec2_resource = boto3.resource('ec2', region_name=region)
         self.pricing_client = boto3.client('pricing', region_name='us-east-1')  # Pricing API is only available in us-east-1
+        self._price_cache = {}  # In-memory cache for instance type prices
+
+        with open(config_path) as json_data:
+            self.config = json.load(json_data)
+            self.current_config = self.config['default']
     
     def get_instance_details(self, instance_id: str) -> Dict[str, Any]:
         """Get the current instance details including vCPU and Memory."""
@@ -48,6 +46,10 @@ class EC2InstanceManager:
         
     def get_ondemand_price(self, instance_type: str) -> float:
         """Get the on-demand price for a Linux instance of the given type."""
+        # Check cache first
+        if instance_type in self._price_cache:
+            return self._price_cache[instance_type]
+
         try:
             filters = [
                 {'Type': 'TERM_MATCH', 'Field': 'operation', 'Value': 'RunInstances'},
@@ -70,7 +72,10 @@ class EC2InstanceManager:
                 term_id = list(terms.keys())[0]
                 price_dimensions = terms[term_id]['priceDimensions']
                 dimension_id = list(price_dimensions.keys())[0]
-                return float(price_dimensions[dimension_id]['pricePerUnit']['USD'])
+                price = float(price_dimensions[dimension_id]['pricePerUnit']['USD'])
+                # Cache the price before returning
+                self._price_cache[instance_type] = price
+                return price
 
             logger.error(f"Error getting price for {instance_type}")  
             return float('inf')  # Return infinity if no price found
@@ -79,13 +84,23 @@ class EC2InstanceManager:
             logger.error(f"Error getting price for {instance_type}: {e}")
             return float('inf')  # Return infinity if there's an error
             
-    def get_compatible_instance_types(self, vcpu: int, memory_mib: int, instance_type_info: Dict[str, Any], original_instance_type: str) -> List[str]:
+    def get_compatible_instance_types(self, instance_details: Dict[str, Any]) -> List[str]:
         """Get compatible instance types based on original instance properties and requirements, sorted by on-demand price."""
+
+        vcpu = instance_details['vcpu']
+        memory_mib = instance_details['memory_mib']
+        instance_type_info=instance_details['instance_type_info']
+        original_instance_type=instance_details['instance_type']
+
+        if original_instance_type.startswith('g') or original_instance_type.startswith('p') or original_instance_type.startswith('f') or original_instance_type.startswith('inf') or original_instance_type.startswith('trn'):
+            return []
+
         original_architecture = instance_type_info['ProcessorInfo']['SupportedArchitectures'][0]
         is_burstable = original_instance_type.startswith('t')
+        is_flex = '-flex' in original_instance_type
         
         # Calculate minimum memory with buffer (if any)
-        memoryBufferPercentage = current_config.get('memoryBufferPercentage', 0)
+        memoryBufferPercentage = self.current_config.get('memoryBufferPercentage', 0)
         if memoryBufferPercentage > 0:
             memory_buffer_multiplier = (100 - memoryBufferPercentage) / 100
             min_memory_mib = int(memory_mib * memory_buffer_multiplier)
@@ -95,28 +110,32 @@ class EC2InstanceManager:
             logger.info(f"Original memory: {memory_mib} MiB, No buffer applied")
             
         try:
+            instance_requirements = {
+                'VCpuCount': {
+                    'Min': vcpu,
+                    'Max': self.current_config.get('maxCpuMultiplier', 2) * vcpu
+                },
+                'MemoryMiB': {
+                    'Min': min_memory_mib,
+                    'Max': self.current_config.get('maxMemoryMultiplier', 2) * memory_mib
+                },
+                'BurstablePerformance': 'included' if is_burstable or is_flex else 'excluded',
+                'InstanceGenerations': ['current'],
+                'BareMetal': self.current_config.get('bareMetal', 'included'),
+                'CpuManufacturers': self.current_config.get('cpuManufacturers', ['amazon-web-services', 'amd', 'intel', 'apple']),
+                'ExcludedInstanceTypes': self.current_config.get('excludedInstanceTypes', []),
+            }
+
+            localStorageBuffer = self.current_config.get('localStorageBufferPercentage', 0)
+            if localStorageBuffer < 100 and instance_type_info.get('InstanceStorageInfo', {}).get('TotalSizeInGB', 0) > 0:
+                instance_requirements['TotalLocalStorageGB'] = {
+                    'Min': instance_type_info.get('InstanceStorageInfo', {}).get('TotalSizeInGB', 0) * (100 - localStorageBuffer) / 100, 
+                }
+
             response = self.ec2_client.get_instance_types_from_instance_requirements(
                 ArchitectureTypes=[original_architecture],
                 VirtualizationTypes=['hvm'],
-                InstanceRequirements={
-                    'VCpuCount': {
-                        'Min': vcpu,
-                        'Max': 2 * vcpu
-                    },
-                    'MemoryMiB': {
-                        'Min': min_memory_mib,
-                        'Max': 2 * memory_mib
-                    },
-                    'BurstablePerformance': 'included' if is_burstable else 'excluded',
-                    'InstanceGenerations': ['current'],
-                    'BareMetal': current_config.get('bareMetal', 'included'),
-                    'CpuManufacturers': current_config.get('cpuManufacturers', ['amazon-web-services', 'amd', 'intel', 'apple']),
-                    'ExcludedInstanceTypes': current_config.get('excludedInstanceTypes', []),
-                    'AcceleratorCount': { 
-                        'Min': current_config.get('acceleratorCountMin', 0),
-                        'Max': current_config.get('acceleratorCountMax', 0)
-                    },
-                }
+                InstanceRequirements=instance_requirements
                 #MaxResults=0  # Adjust as needed
             )
             
@@ -124,8 +143,9 @@ class EC2InstanceManager:
             instance_types_with_prices = []
             for instance in response['InstanceTypes']:
                 instance_type = instance['InstanceType']
-                price = self.get_ondemand_price(instance_type)
-                instance_types_with_prices.append((instance_type, price))
+                if is_flex or is_burstable or not is_flex and '-flex' not in instance_type:
+                    price = self.get_ondemand_price(instance_type)
+                    instance_types_with_prices.append((instance_type, price))
             
             # Sort by price and return just the instance types
             sorted_instances = sorted(instance_types_with_prices, key=lambda x: x[1]) # Sort by price (second element in tuple)
@@ -152,7 +172,7 @@ class EC2InstanceManager:
                 return False
                 
             instance_details = self.get_instance_details(instance_id)
-            tags = instance.create_tags(
+            instance.create_tags(
                 Tags=[
                     {
                         'Key': 'OriginalType',
@@ -177,12 +197,7 @@ class EC2InstanceManager:
 
             
             # If we get here, we need to try different instance types
-            compatible_types = self.get_compatible_instance_types(
-                instance_details['vcpu'],
-                instance_details['memory_mib'],
-                instance_type_info=instance_details['instance_type_info'],
-                original_instance_type=instance_details['instance_type']
-            )
+            compatible_types = self.get_compatible_instance_types(instance_details)
 
             logger.info(f"Original instance type {instance_details['instance_type']}")
             logger.info(f"We will attempt to start the instance with the following instance types: {compatible_types}")
@@ -214,91 +229,3 @@ class EC2InstanceManager:
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
             return False
-
-def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
-    """Lambda handler function"""
-    logger.info(f"Received event: {json.dumps(event)}")
-    
-    detail = event.get('detail', {})
-    request_parameters = detail.get('requestParameters', {})
-    instance_ids = request_parameters.get('instancesSet', {}).get('items', [])
-    if not instance_ids:
-        logger.error("No instance IDs found in the event")
-        return {'statusCode': 400, 'body': 'No instance IDs found'}
-    
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(dedup_table_name)
-
-    results = []
-        
-    instance_manager = EC2InstanceManager()
-    
-    # Process each instance separately
-    for item in instance_ids:
-        instance_id = item.get('instanceId')
-        if not instance_id:
-            continue 
-
-        current_time = int(datetime.now().timestamp())
-        try:
-            response = table.get_item(Key={'dedupKey': instance_id})
-            if 'Item' in response:
-                if response['Item']['ttl'] > current_time:
-                    logger.info(f"{response['Item']['ttl']}, {current_time}")
-                    logger.info(f"Duplicate event detected for instance {instance_id}. Skipping.")
-                    continue
-                else: 
-                    logger.info(f"Old event detected for instance {instance_id}. Processing and updating TTL.")
-        except ClientError as e:
-            logger.error(f"Error checking DynamoDB for existing event: {e}")
-            continue
-
-
-
-        # Use instance id as the deduplication key
-        # This will be consistent across retry attempts within the ttl (5 minutes)
-        dedup_key = instance_id
-
-    
-        try:
-            table.put_item(
-                Item={
-                    'dedupKey': dedup_key,
-                    'timestamp': detail['eventTime'],
-                    'ttl': int((datetime.now() + timedelta(minutes=5)).timestamp())
-                }
-            )
-        
-        except ClientError as e:
-            logger.error(f"Error putting new event into DynamoDB: {e}")
-            continue
-        
-        logger.info("TTL set, continuing processing...")
-
-        try:
-            # Try to start the instance
-            if instance_manager.start_instance_with_fallback(instance_id):
-                results.append({
-                    'instanceId': instance_id,
-                    'status': 'started',
-                    'action': 'restart'
-                })
-                continue
-
-            return {
-                'statusCode': 200,
-                'body': json.dumps({
-                    'message': 'Processing complete',
-                    'results': results
-                })
-            }
-        
-        except Exception as e:
-            logger.error(f"Error processing event: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': json.dumps({
-                    'message': 'Error processing event',
-                    'error': str(e)
-                })
-            }
