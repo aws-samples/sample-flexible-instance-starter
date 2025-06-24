@@ -18,6 +18,7 @@ The solution uses:
 - Lambda function to handle the recovery logic
 - IAM roles and permissions for the recovery Lambda function
 - Instance type mapping for finding comparable instance types
+- AWS SSM Parameter Store to retrieve dynamic configuration for each instance
 - CloudWatch Events Rule to monitor CloudTrail events for StopInstances events
 - Lambda function to handle the revert logic upon instance stop event
 - IAM roles and permissions for the stop Lambda function
@@ -58,6 +59,9 @@ cdk deploy
    - Check if the instances are managed by this automation
    - Attempts to start each instance individually
    - If the start fails, looks up comparable instance types
+      - Uses the AWS SSM Parameter ARN stored in the EC2 instance tag `FlexibleConfigurationArn`
+      - If not present, uses the AWS SSM Parameter named `/flexible-instance-starter/default`
+      - If not present, uses as a fallback the local configuration json
    - Modifies the instance type and retries the start operation
    - Adds a Tag on the EC2 instance with the original instance type
    - Logs all actions and results
@@ -75,7 +79,10 @@ cdk deploy
 
 ## Configuration Parameters
 
-Parameters can be configured in `lambda/config.json`:
+Parameters can be configured in AWS SSM Parameter store.
+1. The solution looks up the AWS EC2 instance tag `FlexibleConfigurationArn`. If presents the solution reads the configuration stored in the AWS SSM parameter
+2. The solution reads the configuration stored in the AWS SSM parameter `/flexible-instance-starter/default`, if present.
+3. The solution uses as a fallback the local configuration json in `lambda_start/config.json`:
 
 ### `memoryBufferPercentage`
 Controls memory allocation flexibility during instance matching. By default, the tool selects instances with memory equal to or greater than the current allocation. This buffer allows selecting instances with slightly less memory, providing more flexibility while maintaining performance requirements.
@@ -83,6 +90,27 @@ Controls memory allocation flexibility during instance matching. By default, the
 - **Type:** Integer (percentage)
 - **Default:** `5`
 - **Example:** With 5% buffer, an 8GB instance could match a 7.6GB target instance
+
+### `localStorageBufferPercentage`
+Controls local NVME disk flexibility during instance matching. By default, the tool selects instances with NMVE disk equal to or greater than the current allocation. This buffer allows selecting instances with slightly less NVME disk, providing more flexibility while maintaing performance requirements.
+
+- **Type:** Integer (percentage)
+- **Default:** `5`
+- **Example:** With 5% buffer, an 1920GB instance store could match a 1824GB instance store target instance
+
+### `maxCpuMultiplier`
+Controls the vCPU multiplier used during instance matching.
+
+- **Type:** Integer (percentage)
+- **Default:** `4`
+- **Example:** With 4x multiplier, an instance with 4 vCPU could match an instance up to 16 vCPU
+
+### `maxMemoryMultiplier`
+Controls the Memory multiplier used during instance matching.
+
+- **Type:** Integer (percentage)
+- **Default:** `2`
+- **Example:** With 2x multiplier, an instance with 16GB of memory could match an instance up to 32GB of memory
 
 ### `cpuManufacturers`
 Specifies allowed CPU manufacturers for target instances. Instances with CPUs from unlisted manufacturers will be excluded from selection.
@@ -121,16 +149,20 @@ Controls inclusion of bare metal instance types in the selection process.
 ```json
 {
     "version": 1,
-    "default": {
-        "memoryBufferPercentage": 10,
-        "cpuManufacturers": ["intel", "amd"],
-        "excludedInstanceTypes": ["t2.*", "t3.*", "m4*"],
-        "bareMetal": "excluded"
-    }
+    
+    "memoryBufferPercentage": 5,
+    "localStorageBufferPercentage": 5,
+
+    "maxCpuMultiplier": 4,
+    "maxMemoryMultiplier": 2,
+
+    "cpuManufacturers": ["intel", "amazon-web-services"],
+    "excludedInstanceTypes": ["p*.*", "g*.*", "inf*.*", "trn*.*", "f*.*"],
+    "bareMetal": "included"
 }
 ```
 
-**Note:** Configuration changes require redeploying the Lambda function to take effect.
+**Note:** Local configuration changes require redeploying the Lambda function to take effect.
 
 
 ## Monitoring

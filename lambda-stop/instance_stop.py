@@ -38,7 +38,7 @@ class EC2InstanceManager:
                 return False
             raise
 
-    def wait_for_instance_stopped(self, instance_id: str, max_attempts: int = 90) -> tuple[bool, str]:
+    def wait_for_instance_stopped(self, instance_id: str, max_attempts: int = 30) -> tuple[bool, str]:
         """
         Wait for an instance to reach the 'stopped' state.
         

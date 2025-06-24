@@ -17,18 +17,18 @@ class EC2InstanceManager:
         self.ec2_client = boto3.client('ec2', region_name=region)
         self.ec2_resource = boto3.resource('ec2', region_name=region)
         self.pricing_client = boto3.client('pricing', region_name='us-east-1')  # Pricing API is only available in us-east-1
+        self.ssm_client = boto3.client('ssm', region_name=region)
         self._price_cache = {}  # In-memory cache for instance type prices
 
         with open(config_path) as json_data:
-            self.config = json.load(json_data)
-            self.current_config = self.config['default']
+            self.current_config = json.load(json_data)
     
     def get_instance_details(self, instance_id: str) -> Dict[str, Any]:
         """Get the current instance details including vCPU and Memory."""
         instance = self.ec2_resource.Instance(instance_id)
-        return self.get_instance_type_details(instance.instance_type)
+        return self.get_instance_type_details(instance.instance_type, instance.tags or [])
 
-    def get_instance_type_details(self, instance_type: str) -> Dict[str, Any]:
+    def get_instance_type_details(self, instance_type: str, tags: List[Dict[str, str]]) -> Dict[str, Any]:
         """Get instance type details including vCPU, Memory and on-demand price."""
         instance_type_info = self.ec2_client.describe_instance_types(
             InstanceTypes=[instance_type]
@@ -38,6 +38,7 @@ class EC2InstanceManager:
         
         return {
             'instance_type': instance_type,
+            'tags': tags,
             'instance_type_info': instance_type_info,
             'vcpu': instance_type_info['VCpuInfo']['DefaultVCpus'],
             'memory_mib': instance_type_info['MemoryInfo']['SizeInMiB'],
@@ -83,6 +84,51 @@ class EC2InstanceManager:
         except Exception as e:
             logger.error(f"Error getting price for {instance_type}: {e}")
             return float('inf')  # Return infinity if there's an error
+        
+    def get_flexible_configuration(self, parameter_arn):
+        """
+        Retrieve configuration from SSM Parameter Store with fallback logic:
+        1. Try using the provided parameter_arn if available
+        2. If that fails, try using '/flexible-instance-starter/default'
+        3. If both fail, use self.current_config
+        
+        Args:
+            parameter_arn: The ARN of the SSM parameter to retrieve
+            
+        Returns:
+            dict: The configuration dictionary
+        """
+        def try_get_parameter(param_name):
+            if not param_name:
+                return None
+                
+            try:
+                response = self.ssm_client.get_parameter(Name=param_name)
+                parameter_value = response['Parameter']['Value']
+                return json.loads(parameter_value)
+            except json.JSONDecodeError as e:
+                logger.error(f"Parameter {param_name} contains invalid JSON: {e}")
+                return None
+            except Exception as e:
+                logger.error(f"Error retrieving parameter {param_name}: {e}")
+                return None
+
+        # First try with provided parameter_arn
+        if parameter_arn:
+            config = try_get_parameter(parameter_arn)
+            if config:
+                return config
+            logger.info(f"Failed to get configuration from {parameter_arn}, trying default parameter")
+
+        # Then try with default parameter
+        default_param = '/flexible-instance-starter/default'
+        config = try_get_parameter(default_param)
+        if config:
+            return config
+        logger.info(f"Failed to get configuration from {default_param}, using current config")
+
+        # Finally fallback to current_config
+        return self.current_config
             
     def get_compatible_instance_types(self, instance_details: Dict[str, Any]) -> List[str]:
         """Get compatible instance types based on original instance properties and requirements, sorted by on-demand price."""
@@ -91,6 +137,7 @@ class EC2InstanceManager:
         memory_mib = instance_details['memory_mib']
         instance_type_info=instance_details['instance_type_info']
         original_instance_type=instance_details['instance_type']
+        tags=instance_details['tags']
 
         if original_instance_type.startswith('g') or original_instance_type.startswith('p') or original_instance_type.startswith('f') or original_instance_type.startswith('inf') or original_instance_type.startswith('trn'):
             return []
@@ -98,6 +145,10 @@ class EC2InstanceManager:
         original_architecture = instance_type_info['ProcessorInfo']['SupportedArchitectures'][0]
         is_burstable = original_instance_type.startswith('t')
         is_flex = '-flex' in original_instance_type
+
+        # Get flexible configuration ARN from tags if present
+        flexible_config_arn = next((tag['Value'] for tag in tags if tag['Key'] == 'FlexibleConfigurationArn'), None)
+        current_config = self.get_flexible_configuration(flexible_config_arn)
         
         # Calculate minimum memory with buffer (if any)
         memoryBufferPercentage = self.current_config.get('memoryBufferPercentage', 0)

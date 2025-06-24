@@ -1,14 +1,13 @@
 {
     "version": 1,
-    "default": {
-        "memoryBufferPercentage": 5,
-        "localStorageBufferPercentage": 5,
+    
+    "memoryBufferPercentage": 5,
+    "localStorageBufferPercentage": 5,
 
-        "maxCpuMultiplier": 4,
-        "maxMemoryMultiplier": 2,
+    "maxCpuMultiplier": 4,
+    "maxMemoryMultiplier": 2,
 
-        "cpuManufacturers": ["intel", "amazon-web-services"],
-        "excludedInstanceTypes": ["p*.*", "g*.*", "inf*.*", "trn*.*", "f*.*"],
-        "bareMetal": "included"
-    }
+    "cpuManufacturers": ["intel", "amazon-web-services"],
+    "excludedInstanceTypes": ["p*.*", "g*.*", "inf*.*", "trn*.*", "f*.*"],
+    "bareMetal": "included"
 }
