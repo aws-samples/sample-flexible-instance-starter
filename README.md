@@ -79,8 +79,8 @@ cdk deploy
 
 ## Configuration Parameters
 
-Parameters can be configured in AWS SSM Parameter store.
-1. The solution looks up the AWS EC2 instance tag `FlexibleConfigurationArn`. If presents the solution reads the configuration stored in the AWS SSM parameter
+Parameters can be configured in AWS SSM Parameter store. The parameter names must start with **`/flexible-instance-starter/`**
+1. The solution looks up the AWS EC2 instance tag `FlexibleConfigurationArn`. If presents the solution reads the configuration stored in the AWS SSM parameter. Example ARN: `arn:aws:ssm:eu-central-1:01234567890:parameter/flexible-instance-starter/configuration-name`
 2. The solution reads the configuration stored in the AWS SSM parameter `/flexible-instance-starter/default`, if present.
 3. The solution uses as a fallback the local configuration json in `lambda_start/config.json`:
 
