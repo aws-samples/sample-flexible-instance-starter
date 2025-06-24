@@ -117,6 +117,7 @@ class EC2InstanceManager:
         if parameter_arn:
             config = try_get_parameter(parameter_arn)
             if config:
+                logger.info(f"Configuration retrieved from {parameter_arn}")
                 return config
             logger.info(f"Failed to get configuration from {parameter_arn}, trying default parameter")
 
@@ -124,10 +125,10 @@ class EC2InstanceManager:
         default_param = '/flexible-instance-starter/default'
         config = try_get_parameter(default_param)
         if config:
+            logger.info(f"Configuration retrieved from {default_param}")
             return config
-        logger.info(f"Failed to get configuration from {default_param}, using current config")
-
-        # Finally fallback to current_config
+        
+        logger.info(f"Failed to get configuration from {default_param}, using local config")
         return self.current_config
             
     def get_compatible_instance_types(self, instance_details: Dict[str, Any]) -> List[str]:
@@ -151,7 +152,7 @@ class EC2InstanceManager:
         current_config = self.get_flexible_configuration(flexible_config_arn)
         
         # Calculate minimum memory with buffer (if any)
-        memoryBufferPercentage = self.current_config.get('memoryBufferPercentage', 0)
+        memoryBufferPercentage = current_config.get('memoryBufferPercentage', 0)
         if memoryBufferPercentage > 0:
             memory_buffer_multiplier = (100 - memoryBufferPercentage) / 100
             min_memory_mib = int(memory_mib * memory_buffer_multiplier)
@@ -164,20 +165,20 @@ class EC2InstanceManager:
             instance_requirements = {
                 'VCpuCount': {
                     'Min': vcpu,
-                    'Max': self.current_config.get('maxCpuMultiplier', 2) * vcpu
+                    'Max': current_config.get('maxCpuMultiplier', 2) * vcpu
                 },
                 'MemoryMiB': {
                     'Min': min_memory_mib,
-                    'Max': self.current_config.get('maxMemoryMultiplier', 2) * memory_mib
+                    'Max': current_config.get('maxMemoryMultiplier', 2) * memory_mib
                 },
                 'BurstablePerformance': 'included' if is_burstable or is_flex else 'excluded',
                 'InstanceGenerations': ['current'],
-                'BareMetal': self.current_config.get('bareMetal', 'included'),
-                'CpuManufacturers': self.current_config.get('cpuManufacturers', ['amazon-web-services', 'amd', 'intel', 'apple']),
-                'ExcludedInstanceTypes': self.current_config.get('excludedInstanceTypes', []),
+                'BareMetal': current_config.get('bareMetal', 'included'),
+                'CpuManufacturers': current_config.get('cpuManufacturers', ['amazon-web-services', 'amd', 'intel', 'apple']),
+                'ExcludedInstanceTypes': current_config.get('excludedInstanceTypes', []),
             }
 
-            localStorageBuffer = self.current_config.get('localStorageBufferPercentage', 0)
+            localStorageBuffer = current_config.get('localStorageBufferPercentage', 0)
             if localStorageBuffer < 100 and instance_type_info.get('InstanceStorageInfo', {}).get('TotalSizeInGB', 0) > 0:
                 instance_requirements['TotalLocalStorageGB'] = {
                     'Min': instance_type_info.get('InstanceStorageInfo', {}).get('TotalSizeInGB', 0) * (100 - localStorageBuffer) / 100, 
@@ -209,7 +210,7 @@ class EC2InstanceManager:
     def start_instance_with_fallback(self, instance_id: str) -> bool:
         """
         Attempt to start an EC2 instance, falling back to different instance types if needed.
-        Only processes instances with the 'flexible' tag set to 'true'.
+        Only processes instances with the 'Flexible' tag set to 'true'.
         Returns True if successfully started, False otherwise.
         """
         try:
@@ -218,8 +219,8 @@ class EC2InstanceManager:
             
             # Check if instance has the flexible tag set to true
             instance_tags = {tag['Key']: tag['Value'] for tag in instance.tags or []}
-            if instance_tags.get('flexible', '').lower() != 'true':
-                logger.info(f"Instance {instance_id} does not have flexible=true tag. Skipping recovery.")
+            if instance_tags.get('Flexible', '').lower() != 'true':
+                logger.info(f"Instance {instance_id} does not have Flexible=true tag. Skipping recovery.")
                 return False
                 
             instance_details = self.get_instance_details(instance_id)

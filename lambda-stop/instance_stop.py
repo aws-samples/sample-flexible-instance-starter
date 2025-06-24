@@ -94,7 +94,7 @@ class EC2InstanceManager:
             
             # Get instance tags
             tags = {tag['Key']: tag['Value'] for tag in instance.tags or []}
-            flexible = tags.get('flexible', 'false').lower()
+            flexible = tags.get('Flexible', 'false').lower()
             
             # Log instance details and flexibility status
             logger.info(f"Processing instance {instance_id}: {instance.instance_type}")

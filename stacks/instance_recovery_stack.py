@@ -43,6 +43,14 @@ class InstanceRecoveryStack(Stack):
             resources=["arn:aws:logs:" + self.region + ":" + self.account + ":log-group:/aws/lambda/InstanceRecoveryHandler:*"]
         ))
 
+        # Add SSM Parameter Store permissions
+        start_handler_role.add_to_policy(iam.PolicyStatement(
+            actions=[
+                "ssm:GetParameter"
+            ],
+            resources=[f"arn:aws:ssm:{self.region}:*:parameter/flexible-instance-starter/*"]
+        ))
+
         # Create a log group for the recovery handler
         start_handler_loggroup = logs.LogGroup(
             self, "InstanceRecoveryHandlerLogGroup",
@@ -67,17 +75,59 @@ class InstanceRecoveryStack(Stack):
         )
 
         # Add IAM permissions
+        # Actions that require Flexible=true tag
         start_handler.add_to_role_policy(iam.PolicyStatement(
             actions=[
                 "ec2:StartInstances",
-                "ec2:DescribeInstances",
+            ],
+            resources=[f"arn:aws:ec2:{self.region}:{self.account}:instance/*"],
+            conditions={
+                "StringEquals": {
+                    "aws:ResourceTag/Flexible": "true"
+                }
+            }
+        ))
+        # Separate policy for ModifyInstanceAttribute with instanceType restriction
+        start_handler.add_to_role_policy(iam.PolicyStatement(
+            actions=[
                 "ec2:ModifyInstanceAttribute",
-                "ec2:CreateTags",
+            ],
+            resources=[f"arn:aws:ec2:{self.region}:{self.account}:instance/*"],
+            conditions={
+                "StringEquals": {
+                    "aws:ResourceTag/Flexible": "true"
+                }
+            }
+        ))
+        # Specific permission for creating only OriginalType tag
+        start_handler.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "ec2:CreateTags"
+            ],
+            resources=[f"arn:aws:ec2:{self.region}:{self.account}:instance/*"],
+            conditions={
+                "StringEquals": {
+                    "aws:ResourceTag/Flexible": "true"
+                },
+                "ForAllValues:StringEquals": {
+                    "aws:TagKeys": ["OriginalType"]
+                }
+            }
+        ))
+        # Actions that don't require tag condition
+        start_handler.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "ec2:DescribeInstances",
                 "ec2:DescribeTags",
                 "ec2:DescribeInstanceTypes",
                 "ec2:GetInstanceTypesFromInstanceRequirements"
             ],
-            resources=["*"]
+            resources=["*"],
+            conditions={
+                "StringEquals": {
+                    "ec2:Region": self.region
+                }
+            }
         ))
         start_handler.add_to_role_policy(iam.PolicyStatement(
             actions=[
@@ -149,16 +199,46 @@ class InstanceRecoveryStack(Stack):
         )
 
         # Add IAM permissions
+        # Actions that require Flexible=true tag
+        stop_handler.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "ec2:ModifyInstanceAttribute"
+            ],
+            resources=[f"arn:aws:ec2:{self.region}:{self.account}:instance/*"],
+            conditions={
+                "StringEquals": {
+                    "aws:ResourceTag/Flexible": "true"
+                }
+            }
+        ))
+        # Specific permission for deleting only OriginalType tag
+        stop_handler.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "ec2:DeleteTags"
+            ],
+            resources=[f"arn:aws:ec2:{self.region}:{self.account}:instance/*"],
+            conditions={
+                "StringEquals": {
+                    "aws:ResourceTag/Flexible": "true"
+                },
+                "ForAllValues:StringEquals": {
+                    "aws:TagKeys": ["OriginalType"]
+                }
+            }
+        ))
+        # Actions that don't require tag condition
         stop_handler.add_to_role_policy(iam.PolicyStatement(
             actions=[
                 "ec2:DescribeInstances",
-                "ec2:ModifyInstanceAttribute",
-                "tag:UntagResource",
-                "ec2:DeleteTags",
                 "ec2:DescribeTags",
                 "ec2:DescribeInstanceTypes"
             ],
-            resources=["*"]
+            resources=["*"],
+            conditions={
+                "StringEquals": {
+                    "ec2:Region": self.region
+                }
+            }
         ))
 
         # Create CloudWatch Event Rule

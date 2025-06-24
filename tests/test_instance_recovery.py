@@ -70,7 +70,7 @@ class TestInstanceRecovery(unittest.TestCase):
     def test_start_instance_with_fallback_flexible_tag(self, mock_boto3_resource):
         # Create mock instance
         mock_instance = MagicMock()
-        mock_instance.tags = [{'Key': 'flexible', 'Value': 'true'}]
+        mock_instance.tags = [{'Key': 'Flexible', 'Value': 'true'}]
         mock_instance.instance_type = 't3.micro'
         mock_instance.start.return_value = None
         

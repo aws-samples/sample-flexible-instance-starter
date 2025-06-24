@@ -9,7 +9,7 @@ This CDK project implements an automation solution that handles EC2 instance sta
 
 When the instances are stopped, the instance type is reverted to the original one.
 
-Only instances with the Tag flexible=true are managed by this automation.
+Only instances with the Tag Flexible=true are managed by this automation.
 
 ## Architecture
 
