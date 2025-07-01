@@ -2,10 +2,15 @@ import json
 import logging
 import os
 import boto3
+import time
 from botocore.exceptions import ClientError
 from typing import Dict, Any
 from datetime import datetime, timedelta
 from ec2_instance_manager import EC2InstanceManager
+
+# Timeout configuration
+LAMBDA_TIMEOUT_SECONDS = 270  # 4 minutes 30 seconds
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -18,6 +23,8 @@ config_path = os.path.join(script_dir, 'config.json')
 
 def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
     """Lambda handler function"""
+    start_time = time.time()
+
     logger.info(f"Received event: {json.dumps(event)}")
     
     detail = event.get('detail', {})
@@ -36,6 +43,15 @@ def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
     
     # Process each instance separately
     for item in instance_ids:
+        elapsed_time = time.time() - start_time
+        if elapsed_time >= LAMBDA_TIMEOUT_SECONDS:
+            logger.warning(f"Lambda timeout approaching ({elapsed_time:.2f}s). Stopping processing.")
+            results.append({
+                'message': f'Processing stopped due to timeout after {elapsed_time:.2f} seconds',
+                'remaining_instances': len(instance_ids) - len([r for r in results if 'instanceId' in r])
+            })
+            break
+
         instance_id = item.get('instanceId')
         if not instance_id:
             continue 

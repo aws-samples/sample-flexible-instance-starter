@@ -198,10 +198,20 @@ class EC2InstanceManager:
                 if is_flex or is_burstable or not is_flex and '-flex' not in instance_type:
                     price = self.get_ondemand_price(instance_type)
                     instance_types_with_prices.append((instance_type, price))
+                    
             
             # Sort by price and return just the instance types
             sorted_instances = sorted(instance_types_with_prices, key=lambda x: x[1]) # Sort by price (second element in tuple)
+            
+            #compatible_types = [instance_type for instance_type, _ in sorted_instances]
             return [instance_type for instance_type, _ in sorted_instances] # Return list of just the instance types
+        
+            # Add original instance type at the end as fallback
+            compatible_types.append(original_instance_type)
+            
+            return compatible_types
+
+
             
         except ClientError as e:
             logger.error(f"Error getting compatible instance types: {e}")
