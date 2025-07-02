@@ -202,14 +202,8 @@ class EC2InstanceManager:
             
             # Sort by price and return just the instance types
             sorted_instances = sorted(instance_types_with_prices, key=lambda x: x[1]) # Sort by price (second element in tuple)
-            
-            #compatible_types = [instance_type for instance_type, _ in sorted_instances]
+            sorted_instances.append(original_instance_type) # Add original instance to the last element to reverse to original instances should the script not find any alternatives
             return [instance_type for instance_type, _ in sorted_instances] # Return list of just the instance types
-        
-            # Add original instance type at the end as fallback
-            compatible_types.append(original_instance_type)
-            
-            return compatible_types
 
 
             
