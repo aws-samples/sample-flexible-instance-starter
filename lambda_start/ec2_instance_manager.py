@@ -202,7 +202,6 @@ class EC2InstanceManager:
             
             # Sort by price and return just the instance types
             sorted_instances = sorted(instance_types_with_prices, key=lambda x: x[1]) # Sort by price (second element in tuple)
-            sorted_instances.append(original_instance_type) # Add original instance to the last element to reverse to original instances should the script not find any alternatives
             return [instance_type for instance_type, _ in sorted_instances] # Return list of just the instance types
 
 
@@ -279,9 +278,41 @@ class EC2InstanceManager:
                     logger.info(f"Failed to start with instance type {new_type}: {e}")
                     continue
             
-            logger.error(f"Failed to start instance {instance_id} with any compatible instance type")
-            return False
+            logger.error(f"Failed to start instance {instance_id} with any compatible instance type, reverting to original instance")
+            return self.handle_complete_failure(instance_id, instance_details, compatible_types)
                 
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
+            return False
+
+    def handle_complete_failure(self, instance_id: str, instance_details: Dict[str, Any], compatible_types: List[str]) -> bool:
+        """
+        Handle the case when all compatible instance types have failed.
+        This method implements additional recovery strategies.
+        
+        Args:
+            instance_id: The EC2 instance ID
+            instance_details: Original instance details
+            compatible_types: List of all compatible types that were tried
+            
+        Returns:
+            bool: True if recovery was successful, False otherwise
+        """
+        original_instance_type = instance_details['instance_type']
+        logger.warning(f"All compatible instance types failed for {instance_id}")
+        logger.info(f"Tried types: {compatible_types}")
+        
+        try:
+            # Revert back to original instance type
+            logger.info(f"Reverting instance {instance_id} back to original type: {original_instance_type}")
+            instance = self.ec2_resource.Instance(instance_id)
+            instance.modify_attribute(
+                InstanceType={'Value': original_instance_type}
+            )
+            
+            logger.error(f"All recovery strategies failed for instance {instance_id}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error in handle_complete_failure for instance {instance_id}: {e}")
             return False
