@@ -6,6 +6,7 @@ from aws_cdk import (
     aws_events as events,
     aws_events_targets as targets,
     aws_dynamodb as dynamodb,
+    aws_ssm as ssm,
     Duration,
     RemovalPolicy
 )
@@ -262,4 +263,26 @@ class InstanceRecoveryStack(Stack):
                     "reason": "This is a wildcard policy for the Lambda function to allow access to the specified EC2 actions on all resources. This is required for the Lambda function to work properly."
                 }
             ]
+        )
+        
+        # Create Parameter store with configuration
+        ssm.StringParameter(
+            self,
+            "InstanceFlexibilityParameter",
+            parameter_name="/flexible-instance-starter/default",
+            string_value='''{
+                "version": 1,
+                
+                "memoryBufferPercentage": 5,
+                "localStorageBufferPercentage": 5,
+
+                "maxCpuMultiplier": 4,
+                "maxMemoryMultiplier": 2,
+
+                "cpuManufacturers": ["intel", "amazon-web-services"],
+                "excludedInstanceTypes": ["p*.*", "g*.*", "inf*.*", "trn*.*", "f*.*"],
+                "bareMetal": "included"
+            }''',
+            description="Test default configuration",
+            tier=ssm.ParameterTier.STANDARD
         )
