@@ -5,17 +5,23 @@ import boto3
 import ast
 from botocore.exceptions import ClientError
 from typing import List, Dict, Any
+from botocore.config import Config
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
+# Create a custom configuration for User Agent
+custom_config = Config(
+    user_agent_extra='FlexibleInstanceStarter/1.0'
+)
+
 
 class EC2InstanceManager:
     def __init__(self, region, config_path):
         self.region = region
-        self.ec2_client = boto3.client('ec2', region_name=region)
-        self.ec2_resource = boto3.resource('ec2', region_name=region)
+        self.ec2_client = boto3.client('ec2', region_name=region, config=custom_config)
+        self.ec2_resource = boto3.resource('ec2', region_name=region, config=custom_config)
         self.pricing_client = boto3.client('pricing', region_name='us-east-1')  # Pricing API is only available in us-east-1
         self.ssm_client = boto3.client('ssm', region_name=region)
         self._price_cache = {}  # In-memory cache for instance type prices

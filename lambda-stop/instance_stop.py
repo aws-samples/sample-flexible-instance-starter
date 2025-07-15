@@ -4,6 +4,7 @@ import os
 import boto3
 from botocore.exceptions import ClientError
 from typing import Dict, Any
+from botocore.config import Config
 import time
 
 # Configure logging
@@ -11,11 +12,16 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 region = os.environ.get('AWS_REGION')
 
+# Create a custom configuration for User Agent
+custom_config = Config(
+    user_agent_extra='FlexibleInstanceStarter/1.0'
+)
+
 class EC2InstanceManager:
     def __init__(self):
         self.region = region
-        self.ec2_client = boto3.client('ec2', region_name=region)
-        self.ec2_resource = boto3.resource('ec2', region_name=region)
+        self.ec2_client = boto3.client('ec2', region_name=region, config=custom_config)
+        self.ec2_resource = boto3.resource('ec2', region_name=region, config=custom_config)
 
     def _is_valid_instance_type(self, instance_type: str) -> bool:
         """
