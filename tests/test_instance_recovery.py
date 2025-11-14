@@ -7,7 +7,8 @@ import os
 # Add the lambda directory to the Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'lambda'))
 
-from instance_recovery import handler, EC2InstanceManager
+from instance_recovery import handler
+from ec2_instance_manager import EC2InstanceManager
 
 class TestInstanceRecovery(unittest.TestCase):
     def setUp(self):
@@ -69,7 +70,7 @@ class TestInstanceRecovery(unittest.TestCase):
     def test_start_instance_with_fallback_flexible_tag(self, mock_boto3_resource):
         # Create mock instance
         mock_instance = MagicMock()
-        mock_instance.tags = [{'Key': 'flexible', 'Value': 'true'}]
+        mock_instance.tags = [{'Key': 'Flexible', 'Value': 'true'}]
         mock_instance.instance_type = 't3.micro'
         mock_instance.start.return_value = None
         

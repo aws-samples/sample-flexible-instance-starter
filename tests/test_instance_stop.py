@@ -43,7 +43,7 @@ class TestInstanceStop(unittest.TestCase):
     def test_reset_instance_type_not_flexible(self, mock_boto3_client, mock_boto3_resource):
         # Mock EC2 instance
         mock_instance = MagicMock()
-        mock_instance.tags = [{'Key': 'flexible', 'Value': 'false'}]
+        mock_instance.tags = [{'Key': 'Flexible', 'Value': 'false'}]
         mock_instance.instance_type = 't3.large'
         mock_boto3_resource.return_value.Instance.return_value = mock_instance
 
@@ -57,7 +57,7 @@ class TestInstanceStop(unittest.TestCase):
     def test_reset_instance_type_flexible_no_original(self, mock_boto3_client, mock_boto3_resource):
         # Mock EC2 instance
         mock_instance = MagicMock()
-        mock_instance.tags = [{'Key': 'flexible', 'Value': 'true'}]
+        mock_instance.tags = [{'Key': 'Flexible', 'Value': 'true'}]
         mock_instance.instance_type = 't3.large'
         mock_boto3_resource.return_value.Instance.return_value = mock_instance
 
@@ -72,7 +72,7 @@ class TestInstanceStop(unittest.TestCase):
         # Mock EC2 instance
         mock_instance = MagicMock()
         mock_instance.tags = [
-            {'Key': 'flexible', 'Value': 'true'},
+            {'Key': 'Flexible', 'Value': 'true'},
             {'Key': 'OriginalType', 'Value': 't3.medium'}
         ]
         mock_instance.instance_type = 't3.large'
@@ -104,7 +104,7 @@ class TestInstanceStop(unittest.TestCase):
         # Mock EC2 instance
         mock_instance = MagicMock()
         mock_instance.tags = [
-            {'Key': 'flexible', 'Value': 'true'},
+            {'Key': 'Flexible', 'Value': 'true'},
             {'Key': 'OriginalType', 'Value': 'invalid.type'}
         ]
         mock_instance.instance_type = 't3.large'
@@ -156,7 +156,7 @@ class TestInstanceStop(unittest.TestCase):
         # Mock EC2 instance
         mock_instance = MagicMock()
         mock_instance.tags = [
-            {'Key': 'flexible', 'Value': 'true'},
+            {'Key': 'Flexible', 'Value': 'true'},
             {'Key': 'OriginalType', 'Value': 't3.medium'}
         ]
         mock_instance.instance_type = 't3.large'

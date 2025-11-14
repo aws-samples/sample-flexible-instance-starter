@@ -4,6 +4,7 @@ import os
 import boto3
 from botocore.exceptions import ClientError
 from typing import Dict, Any
+from botocore.config import Config
 import time
 
 # Configure logging
@@ -11,11 +12,16 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 region = os.environ.get('AWS_REGION')
 
+# Create a custom configuration for User Agent
+custom_config = Config(
+    user_agent_extra='FlexibleInstanceStarter/1.0'
+)
+
 class EC2InstanceManager:
     def __init__(self):
         self.region = region
-        self.ec2_client = boto3.client('ec2', region_name=region)
-        self.ec2_resource = boto3.resource('ec2', region_name=region)
+        self.ec2_client = boto3.client('ec2', region_name=region, config=custom_config)
+        self.ec2_resource = boto3.resource('ec2', region_name=region, config=custom_config)
 
     def _is_valid_instance_type(self, instance_type: str) -> bool:
         """
@@ -94,7 +100,7 @@ class EC2InstanceManager:
             
             # Get instance tags
             tags = {tag['Key']: tag['Value'] for tag in instance.tags or []}
-            flexible = tags.get('flexible', 'false').lower()
+            flexible = tags.get('Flexible', 'false').lower()
             
             # Log instance details and flexibility status
             logger.info(f"Processing instance {instance_id}: {instance.instance_type}")
@@ -162,31 +168,24 @@ def handler(event: Dict[Any, Any], context: Any) -> Dict[str, Any]:
     try:
         # Extract instance IDs from the failed StopInstances call
         detail = event.get('detail', {})
-        request_parameters = detail.get('requestParameters', {})
-        instance_ids = request_parameters.get('instancesSet', {}).get('items', [])
+        instance_id = detail.get('instance-id')
         
-        if not instance_ids:
-            logger.error("No instance IDs found in the event")
-            return {'statusCode': 400, 'body': 'No instance IDs found'}
+        if not instance_id:
+            logger.error("No instance ID found in the event")
+            return {'statusCode': 400, 'body': 'No instance ID found'}
 
         results = []
         
         instance_manager = EC2InstanceManager()
-
-        # Process each instance separately
-        for item in instance_ids:
-            instance_id = item.get('instanceId')
-            if not instance_id:
-                continue
                 
-            # Reset Instance Type if it was changed by this automation
-            result = instance_manager.reset_instance_type(instance_id)
-            if result:
-                results.append({
-                    'instanceId': result.get('instance_id'),
-                    'instanceType': result.get('instance_type'),
-                    'newInstanceType': result.get('new_instance_type')
-                })
+        # Reset Instance Type if it was changed by this automation
+        result = instance_manager.reset_instance_type(instance_id)
+        if result:
+            results.append({
+                'instanceId': result.get('instance_id'),
+                'instanceType': result.get('instance_type'),
+                'newInstanceType': result.get('new_instance_type')
+            })
 
         return {
             'statusCode': 200,

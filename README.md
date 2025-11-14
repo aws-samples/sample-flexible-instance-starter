@@ -9,7 +9,7 @@ This CDK project implements an automation solution that handles EC2 instance sta
 
 When the instances are stopped, the instance type is reverted to the original one.
 
-Only instances with the Tag flexible=true are managed by this automation.
+Only instances with the Tag Flexible=true are managed by this automation.
 
 ## Architecture
 
@@ -18,6 +18,7 @@ The solution uses:
 - Lambda function to handle the recovery logic
 - IAM roles and permissions for the recovery Lambda function
 - Instance type mapping for finding comparable instance types
+- AWS SSM Parameter Store to retrieve dynamic configuration for each instance
 - CloudWatch Events Rule to monitor CloudTrail events for StopInstances events
 - Lambda function to handle the revert logic upon instance stop event
 - IAM roles and permissions for the stop Lambda function
@@ -58,6 +59,9 @@ cdk deploy
    - Check if the instances are managed by this automation
    - Attempts to start each instance individually
    - If the start fails, looks up comparable instance types
+      - Uses the AWS SSM Parameter ARN stored in the EC2 instance tag `FlexibleConfigurationArn`
+      - If not present, uses the AWS SSM Parameter named `/flexible-instance-starter/default`
+      - If not present, uses as a fallback the local configuration json
    - Modifies the instance type and retries the start operation
    - Adds a Tag on the EC2 instance with the original instance type
    - Logs all actions and results
@@ -73,9 +77,93 @@ cdk deploy
    - Remoevs the OriginalType Tag on the EC2 instance
    - Logs all actions and results
 
-## Configuration
+## Configuration Parameters
 
-The instance type mappings can be modified in the Lambda function code (`lambda/instance_recovery.py`). The current mappings include common EC2 instance families, but you can add more based on your needs.
+Parameters can be configured in AWS SSM Parameter store. The parameter names must start with **`/flexible-instance-starter/`**
+1. The solution looks up the AWS EC2 instance tag `FlexibleConfigurationArn`. If presents the solution reads the configuration stored in the AWS SSM parameter. Example ARN: `arn:aws:ssm:eu-central-1:01234567890:parameter/flexible-instance-starter/configuration-name`
+2. The solution reads the configuration stored in the AWS SSM parameter `/flexible-instance-starter/default`, if present.
+3. The solution uses as a fallback the local configuration json in `lambda_start/config.json`
+
+### `memoryBufferPercentage`
+Controls memory allocation flexibility during instance matching. By default, the tool selects instances with memory equal to or greater than the current allocation. This buffer allows selecting instances with slightly less memory, providing more flexibility while maintaining performance requirements.
+
+- **Type:** Integer (percentage)
+- **Default:** `5`
+- **Example:** With 5% buffer, an 8GB instance could match a 7.6GB target instance
+
+### `localStorageBufferPercentage`
+Controls local NVME disk flexibility during instance matching. By default, the tool selects instances with NMVE disk equal to or greater than the current allocation. This buffer allows selecting instances with slightly less NVME disk, providing more flexibility while maintaing performance requirements.
+
+- **Type:** Integer (percentage)
+- **Default:** `5`
+- **Example:** With 5% buffer, an 1920GB instance store could match a 1824GB instance store target instance
+
+### `maxCpuMultiplier`
+Controls the vCPU multiplier used during instance matching.
+
+- **Type:** Integer (percentage)
+- **Default:** `4`
+- **Example:** With 4x multiplier, an instance with 4 vCPU could match an instance up to 16 vCPU
+
+### `maxMemoryMultiplier`
+Controls the Memory multiplier used during instance matching.
+
+- **Type:** Integer (percentage)
+- **Default:** `2`
+- **Example:** With 2x multiplier, an instance with 16GB of memory could match an instance up to 32GB of memory
+
+### `cpuManufacturers`
+Specifies allowed CPU manufacturers for target instances. Instances with CPUs from unlisted manufacturers will be excluded from selection.
+
+- **Type:** Array of strings
+- **Default:** `["intel"]`
+- **Valid options:** `"intel"`, `"amd"`, `"amazon-web-services"`, `"apple"`
+- **Example:** `["intel", "amd"]` allows both Intel and AMD processors
+
+### `excludedInstanceTypes`
+Excludes specific instance families, types, or generations from selection. Supports wildcard patterns using asterisk (`*`) for flexible matching.
+
+- **Type:** Array of strings
+- **Default:** `[]` (empty - no exclusions)
+- **Wildcard examples:**
+  - `"m5.8xlarge"` - Excludes specific instance type
+  - `"c5*"` - Excludes entire C5 family (including C5a, C5n)
+  - `"m5a.*"` - Excludes all M5a sizes, but allows M5n
+  - `"r*"` - Excludes all R-family instances
+  - `"*3*"` - Excludes all 3rd generation instances
+
+### `bareMetal`
+Controls inclusion of bare metal instance types in the selection process.
+
+- **Type:** String
+- **Default:** `"included"`
+- **Options:**
+  - `"included"` - Include bare metal instances in selection
+  - `"required"` - Only consider bare metal instances
+  - `"excluded"` - Skip all bare metal instances
+
+---
+
+### Example Configuration
+
+```json
+{
+    "version": 1,
+    
+    "memoryBufferPercentage": 5,
+    "localStorageBufferPercentage": 5,
+
+    "maxCpuMultiplier": 4,
+    "maxMemoryMultiplier": 2,
+
+    "cpuManufacturers": ["intel", "amazon-web-services"],
+    "excludedInstanceTypes": ["p*.*", "g*.*", "inf*.*", "trn*.*", "f*.*"],
+    "bareMetal": "included"
+}
+```
+
+**Note:** Local configuration changes require redeploying the Lambda function to take effect.
+
 
 ## Monitoring
 
